@@ -1,7 +1,7 @@
 gradio
 yfinance
 pandas
-pandas-ta
+pandas-ta==0.3.14b0
+numpy==1.23.5
 plotly
-numpy
-# finvizfinance removed due to compatibility issues
+# finvizfinance removed due to compatibility issues 
