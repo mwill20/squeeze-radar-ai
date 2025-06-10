@@ -47,28 +47,25 @@ def get_stock_analysis(ticker):
 
         # --- News Fetching ---
         news = stock.news
-        news_md = "### Recent News\n"
+        news_list = []
         if news:
-            for i, article in enumerate(news[:3]):  # Show top 3 articles
-                title = article.get('title', 'No title')
+            for article in news[:3]:  # Show top 3 articles
+                title = article.get('title')
                 link = article.get('link', '#')
                 publisher = article.get('publisher', 'Unknown')
-                news_md += f"{i+1}. **[{title}]({link})** - *{publisher}*\n"
-        else:
-            news_md += "No recent news found."
+                if title and link:
+                    news_list.append(f'<li><a href="{link}" target="_blank">{title}</a> <span style="color:gray;">- {publisher}</span></li>')
+        news_html = '<ul>' + ''.join(news_list) + '</ul>' if news_list else '<span>No recent news found.</span>'
 
-        metrics_md = f"""
-        ### Key Metrics for {info.get('shortName', ticker.upper())}
-        | Metric | Value | Description |
-        | :--- | :--- | :--- |
-        | **Current Price** | `{price:.2f}` | The most recent trading price. |
-        | **Volume** | `{volume:,}` ({volume_spike:.1f}x avg) | Today's volume vs 20-day average. |
-        | **RSI (14-day)** | `{latest_rsi:.2f}` | Relative Strength Index. >70 is overbought, <30 is oversold. |
-        | **Short % of Float** | `{short_float:.2f}%` | Percentage of freely traded shares that are currently sold short. |
-        | **Short Ratio** | `{short_ratio}` | Days required for short sellers to cover their positions. |
-        
-        {news_md}
-        """
+        # --- Key Metrics as DataFrame ---
+        metrics_data = [
+            ["Current Price", f"{price:.2f}", "The most recent trading price."],
+            ["Volume", f"{volume:,} ({volume_spike:.1f}x avg)", "Today's volume vs 20-day average."],
+            ["RSI (14-day)", f"{latest_rsi:.2f}", "Relative Strength Index. >70 is overbought, <30 is oversold."],
+            ["Short % of Float", f"{short_float:.2f}%", "Percentage of freely traded shares that are currently sold short."],
+            ["Short Ratio", f"{short_ratio}", "Days required for short sellers to cover their positions."]
+        ]
+        metrics_df = pd.DataFrame(metrics_data, columns=["Metric", "Value", "Description"])
 
         # --- Plotly Chart Generation with Subplots for MACD ---
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
@@ -97,7 +94,7 @@ def get_stock_analysis(ticker):
         fig.update_yaxes(title_text="Price (USD)", row=1, col=1)
         fig.update_yaxes(title_text="MACD", row=2, col=1)
 
-        return metrics_md, fig
+        return (metrics_df, news_html), fig
 
     except Exception as e:
         return f"An error occurred: {e}", None
@@ -206,7 +203,9 @@ with gr.Blocks(theme=gr.themes.Soft(), title="SqueezeRadarAI") as app:
             ticker_input = gr.Textbox(label="Enter Stock Ticker", placeholder="e.g., GME")
             analyze_button = gr.Button("Analyze")
         with gr.Row():
-            analysis_output = gr.Markdown("### Key Metrics")
+            metrics_output = gr.Dataframe(headers=["Metric", "Value", "Description"], interactive=False)
+        with gr.Row():
+            news_output = gr.HTML()
         with gr.Row():
             stock_chart_output = gr.Plot()
 
@@ -223,7 +222,7 @@ with gr.Blocks(theme=gr.themes.Soft(), title="SqueezeRadarAI") as app:
     analyze_button.click(
         fn=get_stock_analysis,
         inputs=ticker_input,
-        outputs=[analysis_output, stock_chart_output],
+        outputs=[metrics_output, news_output, stock_chart_output],
         show_progress='full'
     )
 
