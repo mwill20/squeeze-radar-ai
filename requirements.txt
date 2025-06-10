@@ -4,4 +4,5 @@ pandas
 pandas-ta==0.3.14b0
 numpy==1.23.5
 plotly
+websockets>=13.0
 # finvizfinance removed due to compatibility issues 
