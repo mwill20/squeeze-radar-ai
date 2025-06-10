@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 def get_stock_analysis(ticker):
     if not ticker:
-        return "Please enter a stock ticker.", None
+        return pd.DataFrame(), "<span style='color:red;'>Please enter a stock ticker.</span>", None
 
     try:
         stock = yf.Ticker(ticker)
@@ -19,7 +19,7 @@ def get_stock_analysis(ticker):
 
         # --- Data Fetching and Validation ---
         if info.get('regularMarketPrice') is None:
-             return f"Could not find data for ticker '{ticker}'. Please check the symbol.", None
+             return pd.DataFrame(), f"<span style='color:red;'>Could not find data for ticker '{ticker}'. Please check the symbol.</span>", None
 
         # Fetch historical data for the last year
         end_date = datetime.now()
@@ -27,7 +27,7 @@ def get_stock_analysis(ticker):
         hist = stock.history(start=start_date, end=end_date)
 
         if hist.empty:
-            return f"No historical data found for {ticker}.", None
+            return pd.DataFrame(), f"<span style='color:red;'>No historical data found for {ticker}.</span>", None
 
         # --- Technical Indicator Calculation ---
         hist.ta.rsi(length=14, append=True)
@@ -97,7 +97,7 @@ def get_stock_analysis(ticker):
         return (metrics_df, news_html), fig
 
     except Exception as e:
-        return f"An error occurred: {e}", None
+        return pd.DataFrame(), f"<span style='color:red;'>An error occurred: {e}</span>", None
 
 def run_squeeze_scanner():
     """
