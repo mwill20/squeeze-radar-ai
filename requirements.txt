@@ -1,0 +1,7 @@
+gradio
+yfinance
+pandas
+pandas-ta
+plotly
+numpy
+# finvizfinance removed due to compatibility issues
