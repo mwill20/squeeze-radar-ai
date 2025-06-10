@@ -1,4 +1,4 @@
-gradio
+gradio==5.33.1
 yfinance
 pandas
 pandas-ta==0.3.14b0
