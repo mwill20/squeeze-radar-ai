@@ -94,7 +94,7 @@ def get_stock_analysis(ticker):
         fig.update_yaxes(title_text="Price (USD)", row=1, col=1)
         fig.update_yaxes(title_text="MACD", row=2, col=1)
 
-        return (metrics_df, news_html), fig
+        return metrics_df, news_html, fig
 
     except Exception as e:
         return pd.DataFrame(), f"<span style='color:red;'>An error occurred: {e}</span>", None
