@@ -1,13 +1,58 @@
+import os
 import gradio as gr
-import pandas as pd
 import yfinance as yf
+import pandas as pd
 import pandas_ta as ta
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import numpy as np
 from datetime import datetime, timedelta
-# Removed finvizfinance dependency due to compatibility issues
-# Using static ticker list for MVP
+import requests
+from dotenv import load_dotenv
+import sys
+
+def load_environment():
+    """Load environment variables and verify API key."""
+    # Print current working directory for debugging
+    print("\n=== Environment Setup ===")
+    print(f"Python version: {sys.version}")
+    print(f"Current working directory: {os.getcwd()}")
+    
+    # Try to load .env file from the same directory as app.py
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    env_path = os.path.join(script_dir, '.env')
+    print(f"Looking for .env file at: {env_path}")
+    
+    # Check if .env file exists
+    if not os.path.exists(env_path):
+        print("ERROR: .env file not found!")
+        print(f"Please create a .env file at: {env_path}")
+        print("The file should contain: FMP_API_KEY=your_api_key_here")
+        return None
+    
+    # Load environment variables from .env file
+    load_dotenv(env_path)
+    
+    # Get FMP API key from environment variables
+    api_key = os.getenv('FMP_API_KEY')
+    
+    # Debug output
+    print("\n=== Environment Variables ===")
+    print(f"FMP_API_KEY found: {'Yes' if api_key else 'No'}")
+    if api_key:
+        print(f"API Key length: {len(api_key)} characters")
+        print(f"Key starts with: {api_key[:4]}...")
+    else:
+        print("ERROR: FMP_API_KEY not found in .env file")
+        print("Please make sure your .env file contains: FMP_API_KEY=your_key_here")
+    
+    return api_key
+
+# Load API key
+FMP_API_KEY = load_environment()
+
+# If we don't have an API key, we'll use a fallback mode
+if not FMP_API_KEY:
+    print("\nWARNING: Running in fallback mode with limited functionality")
+    print("Please set up your FMP API key in the .env file for full features.")
 
 def get_stock_analysis(ticker):
     if not ticker:
@@ -99,93 +144,129 @@ def get_stock_analysis(ticker):
     except Exception as e:
         return pd.DataFrame(), f"<span style='color:red;'>An error occurred: {e}</span>", None
 
-def run_squeeze_scanner():
-    """
-    Scans a predefined list of stocks for squeeze candidates
-    and enriches with yfinance data.
-    """
+def fetch_short_interest_data():
+    """Fetch short interest data from FMP API."""
+    if not FMP_API_KEY:
+        print("Warning: FMP_API_KEY not found in environment variables")
+        return pd.DataFrame()
+    
     try:
-        # For the MVP, we'll use a predefined list of tickers known for high volatility and short interest
-        candidate_tickers = [
-            'GME', 'AMC', 'BBBY', 'BYND', 'UPST', 'CVNA', 'AI', 'PLTR',
-            'SOFI', 'RIVN', 'LCID', 'NKLA', 'W', 'MARA', 'RIOT', 'SPCE',
-            'TSLA', 'NVDA', 'AAPL', 'MSFT', 'AMZN', 'META', 'GOOGL', 'NFLX'
-        ]
-        # Remove known problematic tickers
-        if 'NKLA' in candidate_tickers:  # NKLA has known 404 issues
-            candidate_tickers.remove('NKLA')
-        if 'BBBYQ' in candidate_tickers:  # Use BBBY instead of BBBYQ
-            candidate_tickers.remove('BBBYQ')
-        
-        # In a future version, we would implement dynamic screening with a library like finvizfinance
-        # to get stocks with high short interest in real-time
-
+        url = f"https://financialmodelingprep.com/api/v3/stock/short-interest?apikey={FMP_API_KEY}"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        return pd.DataFrame(data) if data else pd.DataFrame()
     except Exception as e:
-        # Handle any unexpected errors
-        error_df = pd.DataFrame()
-        error_df['Error'] = [f"An unexpected error occurred: {e}"]
-        return error_df
-
-    scan_results = []
-    
-    # Step 2: Analyze the filtered list with yfinance for more detail
-    for ticker_symbol in gr.Progress(track_tqdm=True).tqdm(candidate_tickers, desc="Analyzing Top Candidates"):
-        try:
-            stock = yf.Ticker(ticker_symbol)
-            info = stock.info
-            
-            # Skip if we can't get basic info
-            if not info or 'currentPrice' not in info:
-                continue
-                
-            # Get historical data for calculations
-            hist = stock.history(period="1mo")
-            if hist.empty:
-                continue
-                
-            # Calculate technical indicators
-            hist.ta.rsi(length=14, append=True)
-            rsi = hist['RSI_14'].iloc[-1] if 'RSI_14' in hist.columns else 50  # Default to neutral RSI if calculation fails
-            
-            # Get key metrics
-            short_float = info.get('shortPercentOfFloat', 0)
-            price = info.get('currentPrice', 0)
-            volume = info.get('volume', 0)
-            avg_volume = hist['Volume'].mean()
-            volume_spike = volume / avg_volume if avg_volume > 0 else 0
-            
-            # Calculate Squeeze Score (0-100 scale)
-            # 50% weight to short interest, 30% to volume spike, 20% to RSI position
-            score = (min(short_float * 100, 30) * 0.5) + \
-                   (min(volume_spike * 10, 30) * 0.3) + \
-                   (max(0, 30 - rsi) * 0.2)  # Higher score for lower RSI
-            
-            scan_results.append({
-                'Ticker': ticker_symbol,
-                'Price': price,
-                'Short % Float': f"{short_float * 100:.2f}%",
-                'Volume Spike': f"{volume_spike:.1f}x",
-                'Squeeze Score': f"{score:.1f}"
-            })
-            
-        except Exception as e:
-            # Skip tickers that fail but log the error
-            print(f"Error processing {ticker_symbol}: {str(e)}")
-            # Remove problematic tickers from the list to avoid repeated errors
-            if '404' in str(e) and ticker_symbol in candidate_tickers:
-                print(f"Removing {ticker_symbol} from candidate list due to 404 error")
-                candidate_tickers.remove(ticker_symbol)
-            continue
-    
-    if not scan_results:
+        print(f"Error fetching short interest data: {e}")
         return pd.DataFrame()
 
-    # Create and sort the DataFrame
-    df = pd.DataFrame(scan_results)
-    df_sorted = df.sort_values(by='Squeeze Score', ascending=False)
+def run_squeeze_scanner():
+    """Run the short squeeze scanner using FMP API and yfinance data."""
+    print("\n=== Starting Scanner ===")
+    results = []
     
-    # Convert score back to numeric for proper sorting in Gradio DataFrame
-    df_sorted['Squeeze Score'] = pd.to_numeric(df_sorted['Squeeze Score'])
+    # Expanded list of potential squeeze candidates
+    potential_tickers = [
+        # Meme stocks
+        'GME', 'AMC', 'BB', 'BBBYQ', 'KOSS', 'NOK', 'CLOV', 'WISH', 'RIDE',
+        # High short interest stocks
+        'BYND', 'CVNA', 'UPST', 'AFRM', 'RIVN', 'LCID', 'MULN', 'RDBX', 'REV',
+        # Popular tech
+        'TSLA', 'NVDA', 'AMD', 'PLTR', 'SOFI', 'HOOD', 'COIN', 'MSTR', 'MARA', 'RIOT'
+    ]
+    
+    print(f"Scanning {len(potential_tickers)} potential tickers...")
+    
+    try:
+        # Try to get FMP data but don't fail if it doesn't work
+        try:
+            short_interest_df = fetch_short_interest_data()
+            if not short_interest_df.empty:
+                print(f"Found {len(short_interest_df)} stocks with short interest data")
+                # Add top FMP tickers to our list
+                fmp_tickers = short_interest_df.nlargest(15, 'shortPercent')['symbol'].tolist()
+                potential_tickers = list(set(potential_tickers + fmp_tickers))
+                print(f"Added {len(fmp_tickers)} tickers from FMP")
+        except Exception as e:
+            print(f"Couldn't fetch FMP data, using default list: {e}")
+        
+        # Process each ticker
+        for ticker in potential_tickers:
+            try:
+                stock = yf.Ticker(ticker)
+                info = stock.info
+                
+                # Skip if no price data or price too low
+                if not info or 'regularMarketPrice' not in info or info['regularMarketPrice'] is None:
+                    continue
+                    
+                price = info.get('regularMarketPrice', 0)
+                if price < 1:  # Skip penny stocks
+                    continue
+                
+                # Calculate volume spike (today's volume vs 20-day average)
+                hist = stock.history(period="21d")  # 21 days to calculate 20-day average
+                if len(hist) < 5:  # Skip if not enough data
+                    continue
+                    
+                avg_volume = hist['Volume'][:-1].mean()  # Exclude today
+                volume_today = hist['Volume'][-1] if not hist.empty else 0
+                volume_spike = volume_today / avg_volume if avg_volume > 0 else 1
+                
+                # Get short interest data from yfinance
+                short_float = info.get('shortPercentOfFloat', 0) * 100
+                short_ratio = info.get('shortRatio', 0)
+                
+                # If we have FMP data, use it
+                if 'short_interest_df' in locals() and not short_interest_df.empty:
+                    fmp_data = short_interest_df[short_interest_df['symbol'] == ticker]
+                    if not fmp_data.empty and 'shortPercent' in fmp_data.columns:
+                        short_float = float(fmp_data['shortPercent'].iloc[0])
+                
+                # Calculate squeeze score (0-100)
+                # Higher short float and volume spike = higher score
+                squeeze_score = min(100, (float(short_float) * 2) + (min(volume_spike, 5) * 10))
+                
+                # Only include stocks with significant short interest
+                if float(short_float) < 5:  # At least 5% short interest
+                    continue
+                
+                results.append({
+                    'Ticker': ticker,
+                    'Price': f"${price:.2f}",
+                    'Short % Float': f"{float(short_float):.2f}%",
+                    'Volume Spike': f"{volume_spike:.1f}x",
+                    'Squeeze Score': round(squeeze_score, 1)
+                })
+                
+                print(f"Added {ticker}: {short_float:.1f}% short, {volume_spike:.1f}x volume")
+                
+                # Limit to top 15 results for performance
+                if len(results) >= 15:
+                    break
+                    
+            except Exception as e:
+                print(f"Error processing {ticker}: {e}")
+                continue
+                
+    except Exception as e:
+        print(f"Error in scanner: {e}")
+        # If we have some results, return them even if there was an error
+        if not results:
+            return pd.DataFrame(columns=['Ticker', 'Price', 'Short % Float', 'Volume Spike', 'Squeeze Score'])
+    
+    # Sort by squeeze score (highest first)
+    if not results:
+        print("No stocks met the criteria")
+        return pd.DataFrame(columns=['Ticker', 'Price', 'Short % Float', 'Volume Spike', 'Squeeze Score'])
+    
+    df = pd.DataFrame(results)
+    df_sorted = df.sort_values('Squeeze Score', ascending=False)
+    
+    print(f"\n=== Found {len(df_sorted)} potential squeeze candidates ===")
+    print(df_sorted[['Ticker', 'Squeeze Score', 'Short % Float', 'Volume Spike']].to_string())
+    
+    return df_sorted
     df_sorted['Price'] = pd.to_numeric(df_sorted['Price'])
     # Convert Short % Float to numeric (removing the % sign)
     df_sorted['Short % Float'] = df_sorted['Short % Float'].str.rstrip('%').astype('float')
